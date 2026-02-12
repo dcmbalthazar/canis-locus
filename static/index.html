@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Canis Locus — Border Collie</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; line-height: 1.35; }
+    .wrap { max-width: 980px; margin: 0 auto; }
+    h1 { margin: 0 0 6px; }
+    .sub { color: #555; margin: 0 0 18px; }
+    .grid { display: grid; gap: 12px; grid-template-columns: 1fr; }
+    @media (min-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px; }
+    .card h2 { margin: 0 0 10px; font-size: 18px; }
+
+    .row { display: grid; grid-template-columns: 240px 1fr 1fr; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .row label { font-weight: 700; display: inline-flex; align-items: center; gap: 8px; }
+
+    .locusTag { font-weight: 800; }
+    .desc { color: #666; font-weight: 400; font-size: 12px; }
+
+    .hint {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 18px; height: 18px; border-radius: 999px;
+      border: 1px solid #999; color: #555; font-size: 12px;
+      cursor: help; user-select: none;
+    }
+
+    select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid #ccc; }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #333; background: #111; color: #fff; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .actions { display: flex; gap: 10px; align-items: center; margin: 14px 0; flex-wrap: wrap; }
+    .small { color: #555; font-size: 13px; }
+    .results { margin-top: 14px; }
+    .result { border: 1px solid #e0e0e0; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+    .topline { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .phen { font-weight: 800; }
+    .pct { font-weight: 800; }
+    details { margin-top: 8px; }
+    .alerts { margin-top: 6px; color: #a40000; }
+    code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
+
+    .statusOk { color: #0b6b0b; font-weight: 700; }
+    .statusErr { color: #a40000; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Canis Locus</h1>
+    <p class="sub">Motor genético — Border Collie (E, A, B, D, M, S). Resultado do mais provável → menos provável.</p>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Pai</h2>
+        <div id="parent1"></div>
+      </div>
+      <div class="card">
+        <h2>Mãe</h2>
+        <div id="parent2"></div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="btnCalc">Calcular</button>
+      <span id="status" class="small"></span>
+    </div>
+
+    <div class="small">
+      Dica: <code>merle × merle</code> é bloqueado (para impedir qualquer chance de duplo merle). <code>sp/sp</code> gera alerta (branco excessivo).
+    </div>
+
+    <div class="results" id="results"></div>
+  </div>
+
+<script>
+  const LOCUS_HELP = {
+    "E": "E/e define pigmento eumelanina vs recessivo vermelho australiano (e/e).",
+    "A": "A (Agouti) define padrão: Ay (sable) > at (tricolor) > a (sólido).",
+    "B": "B define preto (B) vs marrom (b). Só b/b vira marrom.",
+    "D": "D define diluição: d/d dilui preto→azul e marrom→lilac.",
+    "M": "M define merle: M/m = merle; m/m = não merle. O app bloqueia merle × merle.",
+    "S": "S (piebald) define quantidade de branco: S/S (mínimo), S/sp (moderado), sp/sp (excessivo)."
+  };
+
+  const ALLELE_HELP = {
+    "E": "E = permite eumelanina.",
+    "e": "e = recessivo; e/e = vermelho australiano.",
+    "Ay": "Ay = sable.",
+    "at": "at = tricolor.",
+    "a": "a = sólido.",
+    "B": "B = preto.",
+    "b": "b = marrom.",
+    "D": "D = não diluído.",
+    "d": "d = diluição.",
+    "M": "M = merle.",
+    "m": "m = não merle.",
+    "S": "S = branco mínimo.",
+    "sp": "sp = piebald."
+  };
+
+  const LOCI = [
+    { key: "E", label: "E", desc: "vermelho australiano (recessivo)", alleles: ["E", "e"] },
+    { key: "A", label: "A", desc: "padrão (sable / tricolor / sólido)", alleles: ["Ay", "at", "a"] },
+    { key: "B", label: "B", desc: "preto × marrom", alleles: ["B", "b"] },
+    { key: "D", label: "D", desc: "diluição (azul / lilac)", alleles: ["D", "d"] },
+    { key: "M", label: "M", desc: "merle", alleles: ["M", "m"] },
+    { key: "S", label: "S", desc: "branco / piebald", alleles: ["S", "sp"] },
+  ];
+
+  function makeSelect(parentKey, locusKey, idx, alleles) {
+    const s = document.createElement("select");
+    s.id = `${parentKey}_${locusKey}_${idx}`;
+    for (const a of alleles) {
+      const opt = document.createElement("option");
+      opt.value = a;
+      opt.textContent = a;
+      if (ALLELE_HELP[a]) opt.title = ALLELE_HELP[a];
+      s.appendChild(opt);
+    }
+    s.addEventListener("change", () => s.title = ALLELE_HELP[s.value] || "");
+    s.title = ALLELE_HELP[s.value] || "";
+    return s;
+  }
+
+  function makeRow(parentKey, locus) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const label = document.createElement("label");
+    label.innerHTML = `<span class="locusTag">${locus.label}</span>
+      <span class="desc">(${locus.desc})</span>
+      <span class="hint" title="${LOCUS_HELP[locus.key] || ""}">i</span>`;
+    row.appendChild(label);
+    row.appendChild(makeSelect(parentKey, locus.key, "1", locus.alleles));
+    row.appendChild(makeSelect(parentKey, locus.key, "2", locus.alleles));
+    return row;
+  }
+
+  function mountParent(containerId, parentKey) {
+    const box = document.getElementById(containerId);
+    box.innerHTML = "";
+    for (const locus of LOCI) box.appendChild(makeRow(parentKey, locus));
+  }
+
+  function getParent(parentKey) {
+    const obj = {};
+    for (const locus of LOCI) {
+      obj[locus.key] = [
+        document.getElementById(`${parentKey}_${locus.key}_1`).value,
+        document.getElementById(`${parentKey}_${locus.key}_2`).value
+      ];
+    }
+    return obj;
+  }
+
+  function setStatus(msg, kind) {
+    const el = document.getElementById("status");
+    el.textContent = msg || "";
+    el.className = "small " + (kind === "err" ? "statusErr" : kind === "ok" ? "statusOk" : "");
+  }
+
+  function renderResults(items) {
+    const root = document.getElementById("results");
+    root.innerHTML = "";
+    if (!items || !items.length) {
+      root.innerHTML = "<p>Nenhum resultado.</p>";
+      return;
+    }
+    for (const it of items) {
+      const div = document.createElement("div");
+      div.className = "result";
+      div.innerHTML = `
+        <div class="topline">
+          <div class="phen">${it.phenotype}</div>
+          <div class="pct">${it.probability}%</div>
+        </div>
+        ${it.alerts?.length ? `<div class="alerts">⚠️ ${it.alerts.join(" | ")}</div>` : ""}
+        <details>
+          <summary>Ver genótipos (${it.genotypes?.length || 0})</summary>
+          <ul>${(it.genotypes || []).map(g => `<li>${g}</li>`).join("")}</ul>
+        </details>
+      `;
+      root.appendChild(div);
+    }
+  }
+
+  async function calculate() {
+    const btn = document.getElementById("btnCalc");
+    btn.disabled = true;
+    setStatus("Calculando...");
+    try {
+      const res = await fetch("/cross", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parent1: getParent("p1"),
+          parent2: getParent("p2")
+        })
+      });
+
+      if (!res.ok) {
+        let msg = "Erro ao calcular.";
+        try {
+          const j = await res.json();
+          if (j.detail) msg = j.detail;
+        } catch {}
+        renderResults([]);
+        setStatus(msg, "err");
+        return;
+      }
+
+      const data = await res.json();
+      renderResults(data);
+      setStatus("OK", "ok");
+    } catch (e) {
+      renderResults([]);
+      setStatus("Servidor não está respondendo.", "err");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  mountParent("parent1", "p1");
+  mountParent("parent2", "p2");
+  document.getElementById("btnCalc").addEventListener("click", calculate);
+  setStatus("OK", "ok");
+</script>
+</body>
+</html>
